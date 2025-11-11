@@ -55,7 +55,9 @@ void cSMP3011::poll()
 
         //printf("Pressure: %f  Temperature: %f \n", pressurePercentage, temperaturePercentage);
         
-        pressure = pressurePercentage/1000.0f;
+        // Pressao em KPa: pressure = pressurePercentage/1000.0f;
+        pressure = pressurePercentage * 0.0001450377f;
+        pressure -= 0.05f; //remove erro de offset
         temperature = temperaturePercentage;
     }
 }
