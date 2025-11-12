@@ -29,10 +29,14 @@ extern "C"
 #define V1FE        gpio_num_t::GPIO_NUM_26
 #define V2FE        gpio_num_t::GPIO_NUM_27
 
-int pressao_ideal_f_pesado = 35;
-int pressao_ideal_t_pesado = 35;
-int pressao_ideal_f_leve = 28;
-int pressao_ideal_t_leve = 28;
+//int pressao_ideal_f_pesado = 35;
+//int pressao_ideal_t_pesado = 35;
+//int pressao_ideal_f_leve = 28;
+//int pressao_ideal_t_leve = 28;
+int pressao_ideal_f_pesado = 10;
+int pressao_ideal_t_pesado = 10;
+int pressao_ideal_f_leve = 8;
+int pressao_ideal_t_leve = 8;
 int pressao_ideal_f_final = 0;
 int pressao_ideal_t_final = 0;
 
@@ -41,7 +45,7 @@ char caracteres_recebidos[QNT_CARACTERES];
 char caracteres_temporarios[QNT_CARACTERES];
 bool informacao_nova = false;
 
-#define TOLERANCIA 1
+#define TOLERANCIA 0.5
 
 //--------------------------------------------------Botões e sensores de assento-----------------------------------//
 #define DEBOUNCE_TIME_MS 50
@@ -87,6 +91,20 @@ typedef struct {
 static QueueHandle_t fila_botoes;
 static volatile uint8_t ultimo_estado[NUM_BOTOES];
 static uint64_t ultimo_evento_ts[NUM_BOTOES];
+
+void atualiza_pressao_final()
+{
+    if (ultimo_estado[B1] + ultimo_estado[B2] + ultimo_estado[B3] >= 2)
+        {
+            pressao_ideal_f_final = pressao_ideal_f_pesado;
+            pressao_ideal_t_final = pressao_ideal_t_pesado;
+        }
+        else
+        {
+            pressao_ideal_f_final = pressao_ideal_f_leve;
+            pressao_ideal_t_final = pressao_ideal_t_leve;
+        }
+}
 
 // ------------------ ISR (filtra mudanças, sem debounce) ------------------
 static void IRAM_ATTR gpio_isr_handler(void *arg) {
@@ -134,16 +152,7 @@ static void tarefa_botoes(void *arg) {
 
                 if (evento.indice == B1 || evento.indice == B2 || evento.indice == B3)
                 {
-                    if (ultimo_estado[B1] + ultimo_estado[B2] + ultimo_estado[B3] >= 2)
-                    {
-                        pressao_ideal_f_final = pressao_ideal_f_pesado;
-                        pressao_ideal_t_final = pressao_ideal_t_pesado;
-                    }
-                    else
-                    {
-                        pressao_ideal_f_final = pressao_ideal_f_leve;
-                        pressao_ideal_t_final = pressao_ideal_t_leve;
-                    }
+                    atualiza_pressao_final();
                 }
             }
         }
@@ -224,10 +233,8 @@ void uart_task(void* arg)
                     token = strtok(NULL, ",");
                     if (token) pressao_ideal_t_pesado = atoi(token);
 
-                    // DEBUG: printa valores recebidos
-                    printf("Valores recebidos: F_leve=%d, F_pesado=%d, T_leve=%d, T_pesado=%d\n",
-                           pressao_ideal_f_leve, pressao_ideal_f_pesado,
-                           pressao_ideal_t_leve, pressao_ideal_t_pesado);
+                    atualiza_pressao_final();
+
                 }
             }
             else if (c == '<')
@@ -261,32 +268,28 @@ void uart_init()
 
 //---------------------------------------------------Fim receber dados serial---------------------------------------//
 
-static void task_serial(void* arg)
-{
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-        
-        printf("%d*%d*%d*%d*%d*%d*%d*%d*%d*%d*%d*\n",
-               ultimo_estado[BE],
-               ultimo_estado[BS],
-               ultimo_estado[BD],
-               ultimo_estado[BI],
-               ultimo_estado[BC],
-               SMP3011.getPressure(),
-               pressao_ideal_f_final,
-               pressao_ideal_t_final,
-               pressao_ideal_t_final,
-               0,
-               0);
-    }
-}
+
+/*
+    PROTOTYPES
+*/
+void sensorSMP3011Task(void *pvParameters);
+//void sensorBMP280Task(void *pvParameters);
+
+void statusLedTask(void *pvParameters);
+
+/*
+    VARIABLES
+*/
+cSMP3011    SMP3011;
+//CBMP280     BMP280;
+//SemaphoreHandle_t sensorMutex;
 
 //Calibragem
 void calibragemTask(void *pvParameters)
 {
     while (1)
     {
-        int leitura_sfe_psi = SMP3011.getPressure();
+        float leitura_sfe_psi = SMP3011.getPressure();
 
         // Lógica de controle
         if (leitura_sfe_psi < pressao_ideal_f_final - TOLERANCIA)
@@ -295,7 +298,7 @@ void calibragemTask(void *pvParameters)
             gpio_set_level(V1FE, 1);      // HIGH
             gpio_set_level(COMP, 1); // HIGH
         }
-        else if (leitura_sfe_psi > pressao_ideal_f_final + 1)
+        else if (leitura_sfe_psi > pressao_ideal_f_final + TOLERANCIA)
         {
             gpio_set_level(V1FE, 0);       // LOW
             gpio_set_level(COMP, 0); // LOW
@@ -313,21 +316,25 @@ void calibragemTask(void *pvParameters)
     }
 }
 
-/*
-    PROTOTYPES
-*/
-void sensorSMP3011Task(void *pvParameters);
-//void sensorBMP280Task(void *pvParameters);
-
-void statusLedTask(void *pvParameters);
-
-/*
-    VARIABLES
-*/
-cSMP3011    SMP3011;
-//CBMP280     BMP280;
-//SemaphoreHandle_t sensorMutex;
-
+static void task_serial(void* arg)
+{
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        printf("%d*%d*%d*%d*%d*%d*%d*%d*%d*%d*%d*\n",
+               ultimo_estado[BE],
+               ultimo_estado[BS],
+               ultimo_estado[BD],
+               ultimo_estado[BI],
+               ultimo_estado[BC],
+               (int)SMP3011.getPressure(),
+               pressao_ideal_f_final,
+               pressao_ideal_t_final,
+               pressao_ideal_t_final,
+               0,
+               0);
+    }
+}
 /**
  * @brief Entry point of the application.
  *
@@ -345,16 +352,7 @@ extern "C" void app_main()
 
     inicia_botoes(); //Inicia botões e sensores de assento
 
-    if (ultimo_estado[B1] + ultimo_estado[B2] + ultimo_estado[B3] >= 2)
-    {
-        pressao_ideal_f_final = pressao_ideal_f_pesado;
-        pressao_ideal_t_final = pressao_ideal_t_pesado;
-    }
-    else
-    {
-        pressao_ideal_f_final = pressao_ideal_f_leve;
-        pressao_ideal_t_final = pressao_ideal_t_leve;
-    }
+    atualiza_pressao_final();
                 
 
     //------------------------------------------------
@@ -432,7 +430,10 @@ extern "C" void app_main()
     {
         lvgl_port_lock(portMAX_DELAY);        
         lv_label_set_text_fmt(lblPressure     , "P1: %5.1f PSI", SMP3011.getPressure());    
-        lv_label_set_text_fmt(lblTemperature  , "T1: %3.0f oC" , SMP3011.getTemperature());    
+        //lv_label_set_text_fmt(lblTemperature  , "T1: %3.0f oC" , SMP3011.getTemperature());  
+        lv_label_set_text_fmt(lblTemperature  , "FL=%d, FP=%d, TL=%d, TP=%d\n",
+                           pressao_ideal_f_leve, pressao_ideal_f_pesado,
+                           pressao_ideal_t_leve, pressao_ideal_t_pesado); 
         //lv_label_set_text_fmt(lblPressure2    , "P2: %5.1f kPa", BMP280.getPressure());    
         //lv_label_set_text_fmt(lblTemperature2 , "T2: %3.0f oC" , BMP280.getTemperature());  
         lvgl_port_unlock();
