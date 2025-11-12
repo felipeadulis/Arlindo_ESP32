@@ -14,6 +14,9 @@ extern "C"
     #include "driver/uart.h"
     #include "freertos/queue.h"
     #include "esp_timer.h"
+    #include "driver/uart.h"
+    #include <string.h>
+    #include <stdlib.h>
 }
 
 
@@ -25,6 +28,20 @@ extern "C"
 #define COMP        gpio_num_t::GPIO_NUM_25
 #define V1FE        gpio_num_t::GPIO_NUM_26
 #define V2FE        gpio_num_t::GPIO_NUM_27
+
+int pressao_ideal_f_pesado = 35;
+int pressao_ideal_t_pesado = 35;
+int pressao_ideal_f_leve = 28;
+int pressao_ideal_t_leve = 28;
+int pressao_ideal_f_final = 0;
+int pressao_ideal_t_final = 0;
+
+#define QNT_CARACTERES 100
+char caracteres_recebidos[QNT_CARACTERES];
+char caracteres_temporarios[QNT_CARACTERES];
+bool informacao_nova = false;
+
+#define TOLERANCIA 1
 
 //--------------------------------------------------Botões e sensores de assento-----------------------------------//
 #define DEBOUNCE_TIME_MS 50
@@ -114,6 +131,20 @@ static void tarefa_botoes(void *arg) {
                 ultimo_evento_ts[evento.indice] = agora;
                 // Atualiza o estado estável
                 ultimo_estado[evento.indice] = evento.estado;
+
+                if (evento.indice == B1 || evento.indice == B2 || evento.indice == B3)
+                {
+                    if (ultimo_estado[B1] + ultimo_estado[B2] + ultimo_estado[B3] >= 2)
+                    {
+                        pressao_ideal_f_final = pressao_ideal_f_pesado;
+                        pressao_ideal_t_final = pressao_ideal_t_pesado;
+                    }
+                    else
+                    {
+                        pressao_ideal_f_final = pressao_ideal_f_leve;
+                        pressao_ideal_t_final = pressao_ideal_t_leve;
+                    }
+                }
             }
         }
     }
@@ -148,6 +179,88 @@ void inicia_botoes(void) {
 }
 //--------------------------------------------------Fim Botões e sensores de assento-----------------------------------//
 
+//---------------------------------------------------Receber dados serial---------------------------------------//
+#define UART_PORT_NUM      UART_NUM_0
+#define BUF_SIZE           128
+#define QNT_CARACTERES     100
+
+// Task única para ler e processar a UART
+void uart_task(void* arg)
+{
+    uint8_t c;
+    char buffer[QNT_CARACTERES];
+    uint8_t ndx = 0;
+    bool recebendo = false;
+
+    while (1)
+    {
+        int len = uart_read_bytes(UART_PORT_NUM, &c, 1, pdMS_TO_TICKS(10));
+        if (len > 0)
+        {
+            if (recebendo)
+            {
+                if (c != '>')
+                {
+                    buffer[ndx++] = c;
+                    if (ndx >= QNT_CARACTERES - 1) ndx = QNT_CARACTERES - 1;
+                }
+                else
+                {
+                    // Mensagem completa recebida
+                    buffer[ndx] = '\0';
+                    ndx = 0;
+                    recebendo = false;
+
+                    // Processa imediatamente a string
+                    char *token = strtok(buffer, ",");
+                    if (token) pressao_ideal_f_leve = atoi(token);
+
+                    token = strtok(NULL, ",");
+                    if (token) pressao_ideal_f_pesado = atoi(token);
+
+                    token = strtok(NULL, ",");
+                    if (token) pressao_ideal_t_leve = atoi(token);
+
+                    token = strtok(NULL, ",");
+                    if (token) pressao_ideal_t_pesado = atoi(token);
+
+                    // DEBUG: printa valores recebidos
+                    printf("Valores recebidos: F_leve=%d, F_pesado=%d, T_leve=%d, T_pesado=%d\n",
+                           pressao_ideal_f_leve, pressao_ideal_f_pesado,
+                           pressao_ideal_t_leve, pressao_ideal_t_pesado);
+                }
+            }
+            else if (c == '<')
+            {
+                recebendo = true;
+                ndx = 0;
+            }
+        }
+
+        // Pequena pausa para liberar CPU
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
+// Inicializa UART e cria task
+void uart_init()
+{
+    const uart_config_t uart_config = {
+        .baud_rate = 9600,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+
+    uart_param_config(UART_PORT_NUM, &uart_config);
+    uart_driver_install(UART_PORT_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
+
+    xTaskCreate(uart_task, "uart_task", 2048, NULL, 5, NULL);
+}
+
+//---------------------------------------------------Fim receber dados serial---------------------------------------//
+
 static void task_serial(void* arg)
 {
     while (1) {
@@ -159,12 +272,44 @@ static void task_serial(void* arg)
                ultimo_estado[BD],
                ultimo_estado[BI],
                ultimo_estado[BC],
-               30,
-               32,
-               35,
-               35,
+               SMP3011.getPressure(),
+               pressao_ideal_f_final,
+               pressao_ideal_t_final,
+               pressao_ideal_t_final,
                0,
                0);
+    }
+}
+
+//Calibragem
+void calibragemTask(void *pvParameters)
+{
+    while (1)
+    {
+        int leitura_sfe_psi = SMP3011.getPressure();
+
+        // Lógica de controle
+        if (leitura_sfe_psi < pressao_ideal_f_final - TOLERANCIA)
+        {
+            gpio_set_level(V2FE, 0);      // LOW
+            gpio_set_level(V1FE, 1);      // HIGH
+            gpio_set_level(COMP, 1); // HIGH
+        }
+        else if (leitura_sfe_psi > pressao_ideal_f_final + 1)
+        {
+            gpio_set_level(V1FE, 0);       // LOW
+            gpio_set_level(COMP, 0); // LOW
+            gpio_set_level(V2FE, 1);       // HIGH
+        }
+        else if ((leitura_sfe_psi >= pressao_ideal_f_final) &&
+                 (leitura_sfe_psi <= pressao_ideal_f_final + TOLERANCIA))
+        {
+            gpio_set_level(V1FE, 0);       // LOW
+            gpio_set_level(COMP, 0); // LOW
+            gpio_set_level(V2FE, 0);       // LOW
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10)); // Pequena pausa
     }
 }
 
@@ -200,6 +345,18 @@ extern "C" void app_main()
 
     inicia_botoes(); //Inicia botões e sensores de assento
 
+    if (ultimo_estado[B1] + ultimo_estado[B2] + ultimo_estado[B3] >= 2)
+    {
+        pressao_ideal_f_final = pressao_ideal_f_pesado;
+        pressao_ideal_t_final = pressao_ideal_t_pesado;
+    }
+    else
+    {
+        pressao_ideal_f_final = pressao_ideal_f_leve;
+        pressao_ideal_t_final = pressao_ideal_t_leve;
+    }
+                
+
     //------------------------------------------------
     // Status LED
     //------------------------------------------------
@@ -224,10 +381,14 @@ extern "C" void app_main()
     SMP3011.init();
     //BMP280.init();
     //sensorMutex = xSemaphoreCreateMutex();
-    xTaskCreate(sensorSMP3011Task, "sensorSMP3011Task", 4096, NULL, 1, NULL);
+    xTaskCreate(sensorSMP3011Task, "sensorSMP3011Task", 4096, NULL, 4, NULL);
     //xTaskCreate(sensorBMP280Task, "sensorBMP280Task", 4096, NULL, 1, NULL);
 
-    xTaskCreatePinnedToCore(task_serial, "serial_task", 2048, NULL, 5, NULL, 1);
+    uart_init();
+
+    xTaskCreatePinnedToCore(task_serial, "serial_task", 2048, NULL, 3, NULL, 1);
+
+    xTaskCreate(calibragemTask, "calibragemTask", 2048, NULL, 5, NULL);
 
     //------------------------------------------------
     // LVGL
