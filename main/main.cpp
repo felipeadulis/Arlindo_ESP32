@@ -74,7 +74,7 @@ static uint64_t ultimo_evento_ts[NUM_BOTOES];
 // ------------------ ISR (filtra mudanças, sem debounce) ------------------
 static void IRAM_ATTR gpio_isr_handler(void *arg) {
     bot_index_t indice = (bot_index_t)(uintptr_t)arg;
-    uint8_t estado_atual = gpio_get_level(botoes[indice]);
+    uint8_t estado_atual = !gpio_get_level(botoes[indice]);
 
     if (estado_atual != ultimo_estado[indice])
     {
@@ -139,7 +139,7 @@ void inicia_botoes(void) {
     gpio_config(&io_conf);
 
     for (int i = 0; i < NUM_BOTOES; i++) {
-        ultimo_estado[i] = gpio_get_level(botoes[i]);
+        ultimo_estado[i] = !gpio_get_level(botoes[i]);
         ultimo_evento_ts[i] = esp_timer_get_time() / 1000;
         gpio_isr_handler_add(botoes[i], gpio_isr_handler, (void *)(uintptr_t)i);
     }
@@ -152,12 +152,19 @@ static void task_serial(void* arg)
 {
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(100));
-
-        printf("Estados dos botões: ");
-        for (int i = 0; i < NUM_BOTOES; i++) {
-            printf("%s=%d ", nomes_botoes[i], ultimo_estado[i]);
-        }
-        printf("\n");
+        
+        printf("%d*%d*%d*%d*%d*%d*%d*%d*%d*%d*%d*\n",
+               ultimo_estado[BE],
+               ultimo_estado[BS],
+               ultimo_estado[BD],
+               ultimo_estado[BI],
+               ultimo_estado[BC],
+               30,
+               32,
+               35,
+               35,
+               0,
+               0);
     }
 }
 
