@@ -24,7 +24,7 @@ extern "C"
 //#include "CBMP280.h"
 #include "CGlobalResources.h"
 
-#define LED_PIN     gpio_num_t::GPIO_NUM_16  
+#define LED_PIN     gpio_num_t::GPIO_NUM_2  
 #define COMP        gpio_num_t::GPIO_NUM_25
 #define V1FE        gpio_num_t::GPIO_NUM_26
 #define V2FE        gpio_num_t::GPIO_NUM_27
@@ -33,12 +33,12 @@ extern "C"
 //int pressao_ideal_t_pesado = 35;
 //int pressao_ideal_f_leve = 28;
 //int pressao_ideal_t_leve = 28;
-int pressao_ideal_f_pesado = 10;
-int pressao_ideal_t_pesado = 10;
-int pressao_ideal_f_leve = 8;
-int pressao_ideal_t_leve = 8;
-int pressao_ideal_f_final = 0;
-int pressao_ideal_t_final = 0;
+int pressao_ideal_f_pesado = 33;
+int pressao_ideal_t_pesado = 35;
+int pressao_ideal_f_leve   = 32;
+int pressao_ideal_t_leve   = 32;
+int pressao_ideal_f_final  =  0;
+int pressao_ideal_t_final  =  0;
 
 #define QNT_CARACTERES 100
 char caracteres_recebidos[QNT_CARACTERES];
@@ -57,8 +57,8 @@ bool informacao_nova = false;
 #define BI_GPIO  GPIO_NUM_19
 #define BC_GPIO  GPIO_NUM_18
 #define B1_GPIO  GPIO_NUM_17
-#define B2_GPIO  GPIO_NUM_0
-#define B3_GPIO  GPIO_NUM_2
+#define B2_GPIO  GPIO_NUM_14
+#define B3_GPIO  GPIO_NUM_16
 
 // ------------------ ENUM PARA ACESSO NOMINAL ------------------
 typedef enum {
@@ -391,12 +391,12 @@ extern "C" void app_main()
     //------------------------------------------------
     // LVGL
     //------------------------------------------------
-    displayInit();
+    //displayInit();
     
     //------------------------------------------------
     // Create a Label
     //------------------------------------------------
-    lvgl_port_lock(portMAX_DELAY);
+    /*lvgl_port_lock(portMAX_DELAY);
     lv_obj_t *scr = lv_disp_get_scr_act(NULL);
         
     lv_obj_t *lblPressure = lv_label_create(scr);    
@@ -411,7 +411,7 @@ extern "C" void app_main()
     lv_obj_align(lblTemperature, LV_ALIGN_TOP_MID, 0, 0);    
     lv_obj_set_y(lblTemperature, 16);
 
-/*
+
     lv_obj_t *lblPressure2 = lv_label_create(scr);    
     lv_label_set_text_fmt(lblPressure2, "P: %5.1f", BMP280.getPressure());    
     lv_obj_set_width(lblPressure2, LCD_H_RES);
@@ -424,9 +424,9 @@ extern "C" void app_main()
     lv_obj_align(lblTemperature2, LV_ALIGN_TOP_MID, 0, 0);    
     lv_obj_set_y(lblTemperature2, 48);    
 */
-    lvgl_port_unlock();
+    //lvgl_port_unlock();
 
-    while(1)
+    /*while(1)
     {
         lvgl_port_lock(portMAX_DELAY);        
         lv_label_set_text_fmt(lblPressure     , "P1: %5.1f PSI", SMP3011.getPressure());    
@@ -438,7 +438,7 @@ extern "C" void app_main()
         //lv_label_set_text_fmt(lblTemperature2 , "T2: %3.0f oC" , BMP280.getTemperature());  
         lvgl_port_unlock();
         vTaskDelay(100/portTICK_PERIOD_MS);
-    }    
+    }    */
 }
 
 void sensorSMP3011Task(void *pvParameters) 
